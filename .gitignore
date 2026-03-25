@@ -1,1 +1,14 @@
-datasets/
+# ----------------------------------------------------------------------
+# DATASETS
+# Ignorar todos os ficheiros pesados dentro das pastas raw
+# ----------------------------------------------------------------------
+datasets/raw/MQTT/*
+datasets/raw/CICIDS/*
+datasets/raw/MODBUS/*
+
+# Exceção: Obrigar o Git a não ignorar os ficheiros .gitkeep
+# (Isto garante que a estrutura de pastas é mantida no repositório)
+
+!datasets/raw/MQTT/.gitkeep
+!datasets/raw/CICIDS/.gitkeep
+!datasets/raw/MODBUS/.gitkeep
