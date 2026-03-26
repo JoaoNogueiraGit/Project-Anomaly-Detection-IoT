@@ -1,10 +1,11 @@
-# ----------------------------------------------------------------------
 # DATASETS
 # Ignorar todos os ficheiros pesados dentro das pastas raw
-# ----------------------------------------------------------------------
 datasets/raw/MQTT/*
 datasets/raw/CICIDS/*
 datasets/raw/MODBUS/*
+
+# MODELOS
+modelos_treinados/*
 
 # Exceção: Obrigar o Git a não ignorar os ficheiros .gitkeep
 # (Isto garante que a estrutura de pastas é mantida no repositório)
@@ -12,3 +13,4 @@ datasets/raw/MODBUS/*
 !datasets/raw/MQTT/.gitkeep
 !datasets/raw/CICIDS/.gitkeep
 !datasets/raw/MODBUS/.gitkeep
+!modelos_treinados/.gitkeep
