@@ -13,4 +13,6 @@ modelos_treinados/*
 !datasets/raw/MQTT/.gitkeep
 !datasets/raw/CICIDS/.gitkeep
 !datasets/raw/MODBUS/.gitkeep
+
+.venv/
 !modelos_treinados/.gitkeep
