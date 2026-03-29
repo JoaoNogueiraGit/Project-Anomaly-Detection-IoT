@@ -15,4 +15,5 @@ modelos_treinados/*
 !datasets/raw/MODBUS/.gitkeep
 
 .venv/
+results/*
 !modelos_treinados/.gitkeep
