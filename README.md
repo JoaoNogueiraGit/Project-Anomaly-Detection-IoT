@@ -20,7 +20,7 @@ Focado em ataques contra o protocolo de mensagens MQTT, amplamente utilizado em 
 
 ### 2. Tráfego de Rede Geral: Dataset CICIDS2017
 Fornece um "vocabulário" diversificado de ciberataques clássicos (ex: DoS, Web Attacks, Infiltração) e tráfego benigno atualizado, essencial para a deteção de anomalias em infraestruturas de rede de suporte à IoT.
-* 🔗 **Link:** *(A adicionar)*
+* 🔗 **Link:** *(https://www.kaggle.com/datasets/ericanacletoribeiro/cicids2017-cleaned-and-preprocessed?resource=download)*
 * **Ficheiros Selecionados:** *(A definir durante a fase de Análise Exploratória)*
 
 ### 3. IoT Industrial (IIoT): Dataset Modbus

@@ -3,6 +3,7 @@
 datasets/raw/MQTT/*
 datasets/raw/CICIDS/*
 datasets/raw/MODBUS/*
+datasets/raw/CICIDS2017/*
 
 # MODELOS
 modelos_treinados/*
