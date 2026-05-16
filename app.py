@@ -100,7 +100,7 @@ else:
     st.sidebar.info("Nenhum dataset disponível para eliminação.")
 
 # --- NOVO: 3 Separadores em vez de 2 ---
-tab1, tab2, tab3 = st.tabs(["📊 Visão por Modelo", "🔄 Comparação de Modelos", "🚀 Treinar Novo Dataset"])
+tab1, tab2, tab3 = st.tabs(["📊 Visão por Modelo", "🔄 Comparação de Modelos", "🚀 Treinar Novo Modelo"])
 
 with tab1:
     st.subheader("Métricas Detalhadas")
@@ -214,6 +214,14 @@ with tab2:
 # O Motor de Treino
 with tab3:
     st.subheader("Importar Dataset Próprio e Treinar")
+
+    if st.session_state.get('treino_concluido', False):
+        nome_treinado = st.session_state.get('nome_recente', 'o seu dataset')
+        st.success(f"✅ Modelos para '{nome_treinado}' treinados com sucesso!")
+        st.balloons()
+        # "Rasgar a nota" para que a animação não se repita a cada clique no site
+        st.session_state.treino_concluido = False
+    
     st.write("Faça upload do seu ficheiro CSV. O sistema irá automaticamente limpar os dados, extrair as melhores variáveis matemáticas e treinar 3 modelos (Random Forest, Isolation Forest e K-Means).")
     
     uploaded_file = st.file_uploader("Importar o seu dataset (.csv)", type=["csv"])
@@ -249,14 +257,14 @@ with tab3:
                         # Chama a função adaptada no pipeline.py
                         pipeline.treinar_fabrica_via_web(nome_novo_modelo, df, coluna_alvo)
                         
-                        st.success(f"✅ Modelos para '{nome_novo_modelo}' treinados com sucesso!")
-                        st.balloons()
-                        
                         # Limpa a cache do Streamlit para ler os novos JSONs criados
                         load_all_metrics.clear()
-                        st.rerun()
                         
-                        st.info("A dashboard foi atualizada. Podes consultar os resultados nos separadores 'Visão por Modelo' e 'Comparação de Modelos'.")
+                        st.session_state.treino_concluido = True
+                        st.session_state.nome_recente = nome_novo_modelo
+                        
+                        # O recarregamento acontece imediatamente a seguir
+                        st.rerun()
                         
                     except Exception as e:
                         st.error(f"Ocorreu um erro durante o treino: {e}")
