@@ -130,57 +130,84 @@ with tab2:
         dados_protocolo = metricas_globais[protocolo_selecionado_t2]
         
         if dados_protocolo:
+            # 1. Preparar o DataFrame original com todos os dados
             lista_comp = []
             for mod, stats in dados_protocolo.items():
                 for metrica in ['accuracy', 'precision', 'recall', 'f1_score']:
                     if metrica in stats:
                         lista_comp.append({
                             "Modelo": mod,
-                            "Metrica": metrica.replace('_', ' ').title(),
+                            "Métrica": metrica.replace('_', ' ').title(),
                             "Valor": stats[metrica]
                         })
             
             if lista_comp:
                 df_comp = pd.DataFrame(lista_comp)
                 
-                # Gráfico
-                fig = px.bar(df_comp, x="Metrica", y="Valor", color="Modelo", 
-                             barmode="group",
-                             title=f"Comparação para Protocolo {protocolo_selecionado_t2}")
+                # --- NOVO: Controlos de Filtragem (Multiselect) ---
+                st.markdown("##### 🎛️ Filtrar Dados")
+                modelos_disponiveis = df_comp['Modelo'].unique().tolist()
+                metricas_disponiveis = df_comp['Métrica'].unique().tolist()
                 
-                fig.update_traces(texttemplate='%{y:.2f}%', textposition='auto')
-                fig.update_layout(yaxis=dict(range=[0, 100], ticksuffix='%'))
-                st.plotly_chart(fig, use_container_width=True)
+                col_filtro1, col_filtro2 = st.columns(2)
+                
+                modelos_selecionados = col_filtro1.multiselect(
+                    "Modelos a mostrar:", 
+                    options=modelos_disponiveis, 
+                    default=modelos_disponiveis # Por defeito, mostra todos
+                )
+                
+                metricas_selecionadas = col_filtro2.multiselect(
+                    "Métricas a mostrar:", 
+                    options=metricas_disponiveis, 
+                    default=metricas_disponiveis # Por defeito, mostra todas
+                )
+                
+                # 2. Criar um novo DataFrame apenas com o que o utilizador selecionou
+                df_filtrado = df_comp[
+                    (df_comp['Modelo'].isin(modelos_selecionados)) & 
+                    (df_comp['Métrica'].isin(metricas_selecionadas))
+                ]
+                
+                # Só desenha o gráfico e mostra exportação se houver dados após o filtro
+                if not df_filtrado.empty:
+                    # Gráfico (agora usa o df_filtrado)
+                    fig = px.bar(df_filtrado, x="Métrica", y="Valor", color="Modelo", 
+                                 barmode="group",
+                                 title=f"Comparação para Protocolo {protocolo_selecionado_t2}")
+                    
+                    fig.update_traces(texttemplate='%{y:.2f}%', textposition='auto')
+                    fig.update_layout(yaxis=dict(range=[0, 100], ticksuffix='%'))
+                    st.plotly_chart(fig, use_container_width=True)
 
-                # Exportar dados
-                st.markdown("---")
-                st.subheader("Exportar Relatório")
-                formato_escolhido = st.radio(
-                    "Selecione o formato de exportação:",
-                    options=["CSV", "JSON"],
-                    horizontal=True, # Mantém as opções lado a lado para um design mais limpo
-                    help="O formato CSV é ideal para Excel/PowerBI. O JSON é ideal para desenvolvimento de software ou integrações."
-                )
-                
-                # Preparar dinamicamente os dados com base na escolha
-                if formato_escolhido == "CSV":
-                    dados_exportar = df_comp.to_csv(index=False).encode('utf-8')
-                    extensao = "csv"
-                    mime_type = "text/csv"
+                    # Exportar Relatório (também usa o df_filtrado)
+                    st.markdown("---")
+                    st.subheader("Exportar Relatório Personalizado")
+                    
+                    formato_escolhido = st.radio(
+                        "Selecione o formato de exportação:",
+                        options=["CSV", "JSON"],
+                        horizontal=True,
+                        key="export_radio"
+                    )
+                    
+                    if formato_escolhido == "CSV":
+                        dados_exportar = df_filtrado.to_csv(index=False).encode('utf-8')
+                        extensao = "csv"
+                        mime_type = "text/csv"
+                    else:
+                        dados_exportar = df_filtrado.to_json(orient='records', indent=4).encode('utf-8')
+                        extensao = "json"
+                        mime_type = "application/json"
+                    
+                    st.download_button(
+                        label=f"📥 Descarregar Resultados em {formato_escolhido}",
+                        data=dados_exportar,
+                        file_name=f'comparacao_{protocolo_selecionado_t2}_filtrada.{extensao}',
+                        mime=mime_type
+                    )
                 else:
-                    # orient="records" cria uma estrutura de lista de objetos: [ {"Modelo": "...", "Métrica": "...", "Valor": ...}, ... ]
-                    dados_exportar = df_comp.to_json(orient='records', indent=4).encode('utf-8')
-                    extensao = "json"
-                    mime_type = "application/json"
-                
-                # Botão único que muda dinamicamente
-                st.download_button(
-                    label=f"📥 Descarregar Resultados em {formato_escolhido}",
-                    data=dados_exportar,
-                    file_name=f'comparacao_modelos_{protocolo_selecionado_t2}.{extensao}',
-                    mime=mime_type,
-                    help=f"Clique para descarregar o ficheiro .{extensao} com as métricas deste protocolo."
-                )
+                    st.info("⚠️ Selecione pelo menos um Modelo e uma Métrica para visualizar e exportar os dados.")
             else:
                 st.warning("Métricas insuficientes para gerar a comparação.")
 
