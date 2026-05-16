@@ -95,8 +95,105 @@ def carregar_dados_protocolo(caminho_pasta):
         X = X.drop(columns=['Label_Binario'])
         
     return X, y_binario
+
+
+def preparar_dados_do_dataframe(df, coluna_alvo_escolhida):
+    """
+    Recebe um DataFrame limpo do Streamlit e a coluna que o utilizador 
+    indicou ser o Rótulo (Label).
+    """
+    # 1. Criar o Label_Binario com base na coluna que o utilizador escolheu
+    df['Label_Binario'] = df[coluna_alvo_escolhida].astype(str).apply(
+        lambda x: 0 if x.strip().lower() in ['benign', 'normal', 'normal traffic', '0'] else 1
+    )
+    
+    # 2. Limpar NaNs
+    df = df.replace([np.inf, -np.inf], np.nan).dropna()
+    
+    # 3. Separar X e y
+    y_binario = df['Label_Binario']
+    X = df.select_dtypes(include=[np.number])
+    
+    if 'Label_Binario' in X.columns:
+        X = X.drop(columns=['Label_Binario'])
+    if coluna_alvo_escolhida in X.columns:
+        X = X.drop(columns=[coluna_alvo_escolhida])
+        
+    return X, y_binario
+
+# ====================================================================
+# 4. O MOTOR DE TREINO PARA DATASET DO UTILIAZDOR (VIA INTERFACE WEB)
+# ====================================================================
+
+def treinar_fabrica_via_web(nome_protocolo, df, coluna_alvo):
+    """Versão adaptada do treinar_fabrica para uso no Streamlit"""
+    print(f"\n⚙️ A INICIAR FÁBRICA DE MODELOS PARA: {nome_protocolo} (Via Web) ⚙️")
+    
+    # Usar a nova função em vez da carregar_dados_protocolo
+    X, y = preparar_dados_do_dataframe(df, coluna_alvo)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    
+    # Selecionar Top 15 Features para otimização
+    rf_temp = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1).fit(X_train, y_train)
+    top_15 = pd.Series(rf_temp.feature_importances_, index=X.columns).nlargest(15).index.tolist()
+    
+    X_train = X_train[top_15]
+    X_test = X_test[top_15]
+    
+    # Normalização Robusta
+    scaler = RobustScaler().fit(X_train)
+    X_train_scaled = scaler.transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Guardar a Base (A Régua e as Features)
+    os.makedirs(f'modelos_treinados/{nome_protocolo}/Base', exist_ok=True)
+    joblib.dump(top_15, f'modelos_treinados/{nome_protocolo}/Base/features.joblib')
+    joblib.dump(scaler, f'modelos_treinados/{nome_protocolo}/Base/scaler.joblib')
+
+    # ---------------------------------------------------------
+    # Passo B: Treinar Algoritmo 1 - Random Forest (Supervisionado)
+    print("🧠 A treinar Random Forest...")
+    rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    rf.fit(X_train_scaled, y_train)
+    
+    rf_preds = rf.predict(X_test_scaled)
+    rf_metricas = calcular_metricas(y_test, rf_preds)
+    guardar_modelo_e_metricas(rf, rf_metricas, nome_protocolo, "RandomForest")
+
+    # ---------------------------------------------------------
+    # Passo C: Treinar Algoritmo 2 - Isolation Forest (Não Supervisionado)
+    print("🧠 A treinar Isolation Forest...")
+    # Aprende APENAS com tráfego normal
+    X_train_normal = X_train_scaled[y_train == 0]
+    
+    iso_f = IsolationForest(n_estimators=200, contamination=0.05, random_state=42, n_jobs=-1)
+    iso_f.fit(X_train_normal)
+    
+    iso_preds_raw = iso_f.predict(X_test_scaled)
+    # Isolation Forest devolve -1 para anomalia e 1 para normal. Vamos converter para o nosso padrão (1=Ataque, 0=Normal)
+    iso_preds = [1 if x == -1 else 0 for x in iso_preds_raw]
+    
+    iso_metricas = calcular_metricas(y_test, iso_preds)
+    guardar_modelo_e_metricas(iso_f, iso_metricas, nome_protocolo, "IsolationForest")
+
+    # ---------------------------------------------------------
+    # Passo D: Treinar Algoritmo 3 - K-Means (Não Supervisionado)
+    print("🧠 A treinar K-Means...")
+    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+    kmeans.fit(X_train_scaled)
+    
+    kmeans_preds = kmeans.predict(X_test_scaled)
+    # Como o K-Means não sabe o que é ataque, assumimos que o cluster com menos pacotes é a anomalia.
+    cluster_anomalia = 1 if sum(kmeans_preds == 1) < sum(kmeans_preds == 0) else 0
+    kmeans_preds_binario = [1 if x == cluster_anomalia else 0 for x in kmeans_preds]
+    
+    kmeans_metricas = calcular_metricas(y_test, kmeans_preds_binario)
+    guardar_modelo_e_metricas(kmeans, kmeans_metricas, nome_protocolo, "KMeans")
+
+    print(f"🏁 Fábrica de {nome_protocolo} terminada com sucesso!\n")
+
 # ==========================================
-# 3. O MOTOR PRINCIPAL DE TREINO
+# 4. O MOTOR PRINCIPAL DE TREINO
 # ==========================================
 
 def treinar_fabrica(nome_protocolo, caminho_pasta):

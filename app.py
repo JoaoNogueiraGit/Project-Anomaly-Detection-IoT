@@ -3,6 +3,9 @@ import pandas as pd
 import plotly.express as px
 import json
 import os
+from thefuzz import process 
+import pipeline 
+import shutil
 
 # Configuração da Página
 st.set_page_config(page_title="IoT Anomaly Detection Dashboard", layout="wide")
@@ -39,7 +42,7 @@ def load_all_metrics(base_dir="modelos_treinados"):
             json_path = os.path.join(protocolo_path, modelo, "metricas.json")
             
             if os.path.exists(json_path):
-                # Formatar o nome do modelo para a interface gráfica (ex: 'random_forest' -> 'Random Forest')
+                # Formatar o nome do modelo para a interface gráfica
                 nome_modelo_formatado = modelo.replace('_', ' ').title()
                 
                 # Ler o ficheiro json
@@ -52,52 +55,88 @@ def load_all_metrics(base_dir="modelos_treinados"):
 # 2. Interface Principal da Dashboard
 # ==========================================
 
-# Carregar dados
 metricas_globais = load_all_metrics()
 
-if not metricas_globais:
-    st.warning("Nenhum dado encontrado. Verifica se a pasta 'modelos_treinados' está na mesma diretoria do 'app.py'.")
-else:
-    # Sidebar: Seleção do Protocolo
-    st.sidebar.header("Configurações de Visualização")
-    protocolo_selecionado = st.sidebar.selectbox("Selecione o Protocolo:", list(metricas_globais.keys()))
+# Sidebar: Seleção do Protocolo (Movida para cima para servir todas as tabs)
+st.sidebar.header("Configurações Globais")
 
-    # Filtrar dados para o protocolo selecionado
-    dados_protocolo = metricas_globais[protocolo_selecionado]
-
-    # --- Separadores de Visualização ---
-    tab1, tab2 = st.tabs(["📊 Visão por Modelo", "🔄 Comparação de Modelos"])
-
-    with tab1:
-        st.subheader(f"Métricas Detalhadas: {protocolo_selecionado}")
+if metricas_globais:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚠️ Zona de Perigo")
+    
+    # Lista os datasets disponíveis para eliminação
+    dataset_para_eliminar = st.sidebar.selectbox(
+        "Selecionar dataset para apagar:",
+        options=list(metricas_globais.keys()),
+        key="delete_select"
+    )
+    
+    # Checkbox de segurança para o utilizador confirmar que sabe o que está a fazer
+    confirmar_remocao = st.sidebar.checkbox(
+        f"Confirmo que quero apagar os dados de '{dataset_para_eliminar}'", 
+        key="confirm_check"
+    )
+    
+    if st.sidebar.button("🗑️ Apagar Dataset e Modelos", type="primary", disabled=not confirmar_remocao):
+        pasta_alvo = os.path.join("modelos_treinados", dataset_para_eliminar)
         
-        # Só mostrar se existirem modelos para este protocolo
+        if os.path.exists(pasta_alvo):
+            try:
+                # 1. Remover a pasta física e ficheiros (.joblib, .json)
+                shutil.rmtree(pasta_alvo)
+                
+                # 2. Limpar a cache do Streamlit para forçar a releitura do disco
+                load_all_metrics.clear()
+                
+                st.sidebar.success(f"Dados de '{dataset_para_eliminar}' removidos com sucesso!")
+                
+                # 3. Forçar o Streamlit a recarregar a interface imediatamente
+                st.rerun()
+                
+            except Exception as e:
+                st.sidebar.error(f"Erro ao apagar ficheiros: {e}")
+else:
+    st.sidebar.markdown("---")
+    st.sidebar.info("Nenhum dataset disponível para eliminação.")
+
+# --- NOVO: 3 Separadores em vez de 2 ---
+tab1, tab2, tab3 = st.tabs(["📊 Visão por Modelo", "🔄 Comparação de Modelos", "🚀 Treinar Novo Dataset"])
+
+with tab1:
+    st.subheader("Métricas Detalhadas")
+    if metricas_globais:
+        protocolo_selecionado = st.selectbox("Selecione o Protocolo:", list(metricas_globais.keys()), key="tab1_prot")
+        dados_protocolo = metricas_globais[protocolo_selecionado]
+        
         if dados_protocolo:
             modelo_escolhido = st.selectbox("Escolha o Modelo:", list(dados_protocolo.keys()))
             
             m = dados_protocolo[modelo_escolhido]
             
             col1, col2, col3, col4 = st.columns(4)
-            # Usamos o .get() para não dar erro caso o JSON não tenha alguma destas métricas
             col1.metric("Accuracy", f"{m.get('accuracy', 0):.2f}%")
             col2.metric("Precision", f"{m.get('precision', 0):.2f}%")
             col3.metric("Recall", f"{m.get('recall', 0):.2f}%")
             col4.metric("F1-Score", f"{m.get('f1_score', 0):.2f}%")
         else:
             st.info("Nenhum modelo treinado encontrado para este protocolo.")
+    else:
+        st.warning("Nenhum dado encontrado. Treine um modelo no separador 'Treinar Novo Dataset'.")
 
-    with tab2:
-        st.subheader("Comparação de Performance entre Modelos")
+with tab2:
+    st.subheader("Comparação de Performance entre Modelos")
+    if metricas_globais:
+        protocolo_selecionado_t2 = st.selectbox("Selecione o Protocolo:", list(metricas_globais.keys()), key="tab2_prot")
+        dados_protocolo = metricas_globais[protocolo_selecionado_t2]
         
         if dados_protocolo:
             lista_comp = []
             for mod, stats in dados_protocolo.items():
                 for metrica in ['accuracy', 'precision', 'recall', 'f1_score']:
-                    # Só adicionamos se a métrica existir no JSON
                     if metrica in stats:
                         lista_comp.append({
                             "Modelo": mod,
-                            "Métrica": metrica.replace('_', ' ').title(),
+                            "Metrica": metrica.replace('_', ' ').title(),
                             "Valor": stats[metrica]
                         })
             
@@ -105,14 +144,92 @@ else:
                 df_comp = pd.DataFrame(lista_comp)
                 
                 # Gráfico
-                fig = px.bar(df_comp, x="Métrica", y="Valor", color="Modelo", 
+                fig = px.bar(df_comp, x="Metrica", y="Valor", color="Modelo", 
                              barmode="group",
-                             title=f"Comparação para Protocolo {protocolo_selecionado}")
+                             title=f"Comparação para Protocolo {protocolo_selecionado_t2}")
                 
                 fig.update_traces(texttemplate='%{y:.2f}%', textposition='auto')
-
-                # Ajustar eixo Y para percentagem (0 a 100)
                 fig.update_layout(yaxis=dict(range=[0, 100], ticksuffix='%'))
                 st.plotly_chart(fig, use_container_width=True)
+
+                # Exportar dados
+                st.markdown("---")
+                st.subheader("Exportar Relatório")
+                formato_escolhido = st.radio(
+                    "Selecione o formato de exportação:",
+                    options=["CSV", "JSON"],
+                    horizontal=True, # Mantém as opções lado a lado para um design mais limpo
+                    help="O formato CSV é ideal para Excel/PowerBI. O JSON é ideal para desenvolvimento de software ou integrações."
+                )
+                
+                # Preparar dinamicamente os dados com base na escolha
+                if formato_escolhido == "CSV":
+                    dados_exportar = df_comp.to_csv(index=False).encode('utf-8')
+                    extensao = "csv"
+                    mime_type = "text/csv"
+                else:
+                    # orient="records" cria uma estrutura de lista de objetos: [ {"Modelo": "...", "Métrica": "...", "Valor": ...}, ... ]
+                    dados_exportar = df_comp.to_json(orient='records', indent=4).encode('utf-8')
+                    extensao = "json"
+                    mime_type = "application/json"
+                
+                # Botão único que muda dinamicamente
+                st.download_button(
+                    label=f"📥 Descarregar Resultados em {formato_escolhido}",
+                    data=dados_exportar,
+                    file_name=f'comparacao_modelos_{protocolo_selecionado_t2}.{extensao}',
+                    mime=mime_type,
+                    help=f"Clique para descarregar o ficheiro .{extensao} com as métricas deste protocolo."
+                )
             else:
                 st.warning("Métricas insuficientes para gerar a comparação.")
+
+# O Motor de Treino
+with tab3:
+    st.subheader("Importar Dataset Próprio e Treinar")
+    st.write("Faça upload do seu ficheiro CSV. O sistema irá automaticamente limpar os dados, extrair as melhores variáveis matemáticas e treinar 3 modelos (Random Forest, Isolation Forest e K-Means).")
+    
+    uploaded_file = st.file_uploader("Importar o seu dataset (.csv)", type=["csv"])
+    
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file, comment = "#")
+        colunas_disponiveis = df.columns.tolist()
+        
+        with st.expander("Pré-visualizar Dataset"):
+            st.dataframe(df.head())
+
+        # Tentar adivinhar a coluna de Label (Fuzzy Matching)
+        melhor_palpite, score = process.extractOne("Label", colunas_disponiveis)
+        index_padrao = colunas_disponiveis.index(melhor_palpite) if score > 80 else 0
+
+        with st.form("form_treino"):
+            nome_novo_modelo = st.text_input("Dê um nome a este conjunto de dados (ex: IoT_Rede_Casa):", value="Custom_Dataset")
+            
+            coluna_alvo = st.selectbox(
+                "Qual destas colunas indica se o tráfego é Normal (0) ou Ataque (1)? (Label)",
+                options=colunas_disponiveis,
+                index=index_padrao
+            )
+            
+            botao_treinar = st.form_submit_button("🚀 Iniciar Treino de Modelos")
+
+        if botao_treinar:
+            if nome_novo_modelo.strip() == "":
+                st.error("Por favor, insira um nome válido para o conjunto de modelos.")
+            else:
+                with st.spinner("A limpar dados e a treinar algoritmos... Isto pode demorar alguns minutos dependendo do tamanho do dataset."):
+                    try:
+                        # Chama a função adaptada no pipeline.py
+                        pipeline.treinar_fabrica_via_web(nome_novo_modelo, df, coluna_alvo)
+                        
+                        st.success(f"✅ Modelos para '{nome_novo_modelo}' treinados com sucesso!")
+                        st.balloons()
+                        
+                        # Limpa a cache do Streamlit para ler os novos JSONs criados
+                        load_all_metrics.clear()
+                        st.rerun()
+                        
+                        st.info("A dashboard foi atualizada. Podes consultar os resultados nos separadores 'Visão por Modelo' e 'Comparação de Modelos'.")
+                        
+                    except Exception as e:
+                        st.error(f"Ocorreu um erro durante o treino: {e}")
