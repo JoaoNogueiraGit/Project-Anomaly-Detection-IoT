@@ -6,6 +6,7 @@ import os
 from thefuzz import process 
 import pipeline 
 import shutil
+import joblib
 
 # Configuração da Página
 st.set_page_config(page_title="IoT Anomaly Detection Dashboard", layout="wide")
@@ -100,7 +101,7 @@ else:
     st.sidebar.info("Nenhum dataset disponível para eliminação.")
 
 # --- NOVO: 3 Separadores em vez de 2 ---
-tab1, tab2, tab3 = st.tabs(["📊 Visão por Modelo", "🔄 Comparação de Modelos", "🚀 Treinar Novo Modelo"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Visão por Modelo", "🔄 Comparação de Modelos", "🚀 Treinar Novo Modelo", "🔮 Fazer Previsões (Inferência)"])
 
 with tab1:
     st.subheader("Métricas Detalhadas")
@@ -268,3 +269,122 @@ with tab3:
                         
                     except Exception as e:
                         st.error(f"Ocorreu um erro durante o treino: {e}")
+
+
+with tab4:
+    st.subheader("Fazer Previsões em Novos Dados (Inferência)")
+    st.write("Utilize um modelo previamente treinado para analisar tráfego novo e detetar anomalias em tempo real.")
+    
+    # Só permite avançar se houver pastas de modelos criadas
+    if os.path.exists("modelos_treinados") and len(os.listdir("modelos_treinados")) > 0:
+        protocolos_reais = [d for d in os.listdir("modelos_treinados") if os.path.isdir(os.path.join("modelos_treinados", d))]
+        
+        st.markdown("#### 1. Selecionar o Modelo")
+        col_inf1, col_inf2 = st.columns(2)
+        prot_inferencia = col_inf1.selectbox("Protocolo / Dataset Base:", protocolos_reais)
+        
+        # Listar os modelos disponíveis para este protocolo (excluindo a pasta 'Base')
+        caminho_prot = os.path.join("modelos_treinados", prot_inferencia)
+        modelos_reais = [m for m in os.listdir(caminho_prot) if os.path.isdir(os.path.join(caminho_prot, m)) and m != "Base"]
+        
+        mod_inferencia = col_inf2.selectbox("Algoritmo a utilizar:", modelos_reais)
+        
+        st.markdown("#### 2. Importar Dados Desconhecidos")
+        # Ficheiro para previsão
+        ficheiro_inferencia = st.file_uploader("Importar novo tráfego (.csv)", type=["csv"], key="upload_inf")
+        
+        if ficheiro_inferencia and st.button("🔍 Analisar Tráfego"):
+            with st.spinner("A acordar a IA e a analisar pacotes..."):
+                try:
+                    # 1. Carregar os Dados Novos (ignorando comentários como fizemos antes)
+                    df_novo = pd.read_csv(ficheiro_inferencia, comment='#')
+
+                    # 2. Padronizar nomes das colunas
+                    df_novo = pipeline.padronizar_nomes_colunas(df_novo)
+                    
+                    # 2. Carregar o Modelo, Scaler e Features guardados
+                    caminho_base = os.path.join(caminho_prot, "Base")
+                    features_esperadas = joblib.load(os.path.join(caminho_base, "features.joblib"))
+                    scaler = joblib.load(os.path.join(caminho_base, "scaler.joblib"))
+                    modelo = joblib.load(os.path.join(caminho_prot, mod_inferencia, "modelo.joblib"))
+                    
+                    # 3. Validar se o ficheiro novo tem as colunas que o modelo conhece
+                    colunas_em_falta = [col for col in features_esperadas if col not in df_novo.columns]
+                    
+                    if colunas_em_falta:
+                        st.error(f"Erro: O ficheiro importado não contém as variáveis necessárias para usar este modelo. Faltam as colunas: {colunas_em_falta}")
+                    else:
+                        # 4. Extrair apenas as top 15 features e aplicar o Scaler
+                        X_novo = df_novo[features_esperadas]
+                        X_novo_scaled = scaler.transform(X_novo)
+                        
+                        # 5. A Magia acontece: Fazer a Previsão!
+                        if "RandomForest" in mod_inferencia:
+                            # Pede as percentagens [Probabilidade Normal, Probabilidade Ataque]
+                            probabilidades = modelo.predict_proba(X_novo_scaled)
+                        
+                            # Extrai só a probabilidade de ser ataque (coluna 1)
+                            prob_ataque = probabilidades[:, 1]
+                        
+                            # O LIMIAR DE SEGURANÇA: Se tiver mais de 30% de parecença com um ataque, dispara o alarme!
+                            limiar = 0.20 
+                            previsoes = [1 if prob >= limiar else 0 for prob in prob_ataque]
+                        else:
+                            # Para K-Means e Isolation Forest usamos a previsão normal
+                                previsoes = modelo.predict(X_novo_scaled)
+                        
+                        # Ajuste específico para o Isolation Forest (que devolve -1 para anomalias)
+                        if "Isolation" in mod_inferencia:
+                            previsoes = [1 if x == -1 else 0 for x in previsoes]
+                            
+                        # 6. Juntar os resultados ao DataFrame original para o utilizador ver
+                        df_novo['Previsao_ML'] = previsoes
+                        df_novo['Classificacao'] = df_novo['Previsao_ML'].apply(lambda x: "🚨 Ataque/Anomalia" if x == 1 else "✅ Trafego Normal")
+                        
+                        st.success("Análise Concluída com Sucesso!")
+                        
+                        # --- Visualização de Resultados ---
+                        st.markdown("### Resumo da Análise")
+                        
+                        contagem = df_novo['Classificacao'].value_counts().reset_index()
+                        contagem.columns = ['Estado', 'Número de Pacotes']
+                        
+                        col_res1, col_res2 = st.columns([1, 2])
+                        
+                        with col_res1:
+                            st.dataframe(contagem, hide_index=True)
+                            
+                        with col_res2:
+                            # Gráfico circular rápido para perceber a saúde da rede
+                            fig_pie = px.pie(contagem, names='Estado', values='Número de Pacotes', 
+                                             title="Distribuição do Tráfego Analisado",
+                                             color='Estado',
+                                             color_discrete_map={"✅ Tráfego Normal": "#00CC96", "🚨 Ataque/Anomalia": "#EF553B"})
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                            
+                        # Mostrar as linhas problemáticas
+                        st.markdown("#### Detalhes das Anomalias Detetadas")
+                        anomalias_df = df_novo[df_novo['Previsao_ML'] == 1]
+                        
+                        if not anomalias_df.empty:
+                            st.warning(f"Foram encontrados {len(anomalias_df)} pacotes anómalos. Aqui estão os primeiros registos:")
+                            # Mostramos a classificação e as features que o modelo usou
+                            st.dataframe(anomalias_df[['Classificacao'] + features_esperadas].head(50)) 
+                        else:
+                            st.info("Parabéns! Nenhuma anomalia foi detetada neste conjunto de dados.")
+                            
+                        # Exportar Dados Anotados (Feature pedida anteriormente)
+                        st.markdown("---")
+                        dados_anotados = df_novo.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label=f"📥 Exportar Dataset Classificado ({mod_inferencia})",
+                            data=dados_anotados,
+                            file_name=f"rede_analisada_{prot_inferencia}_{mod_inferencia}.csv",
+                            mime="text/csv",
+                            help="Descarrega o teu CSV original, agora com duas colunas extras indicando a previsão da IA."
+                        )
+                        
+                except Exception as e:
+                    st.error(f"Ocorreu um erro técnico durante a inferência: {e}")
+    else:
+        st.info("Ainda não existem modelos treinados na plataforma. Por favor, vá ao separador 'Treinar Novo Dataset'.")

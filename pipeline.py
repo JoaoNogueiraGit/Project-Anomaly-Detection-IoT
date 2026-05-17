@@ -10,6 +10,47 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.cluster import KMeans
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
+
+# ==========================================
+# DICIONÁRIO DE PADRONIZAÇÃO UNIVERSAL
+# ==========================================
+DICIONARIO_UNIVERSAL = {
+    # Portas de Origem e Destino
+    ' Destination Port': 'destination_port',
+    'Dest_Port': 'destination_port',
+    ' Destination_Port': 'destination_port',
+    ' Source Port': 'source_port',
+    'Source_Port': 'source_port',
+    
+    # Duração do Fluxo / Conexão
+    ' Flow Duration': 'flow_duration',
+    'Connection_Duration': 'flow_duration',
+    'Flow_Duration': 'flow_duration',
+    
+    # Contagem de Pacotes e Bytes
+    ' Total Fwd Packets': 'total_fwd_packets',
+    'Packets_Sent': 'total_fwd_packets',
+    'Total_Fwd_Packets': 'total_fwd_packets',
+    ' Total Backward Packets': 'total_bwd_packets',
+    'Bytes_Transferred': 'total_bytes',
+    ' Total Length of Fwd Packets': 'total_len_fwd_packets',
+    
+    # Taxas de fluxo
+    ' Flow Packets/s': 'flow_packets_per_sec',
+    'Flow_Rate': 'flow_packets_per_sec'
+}
+
+def padronizar_nomes_colunas(df):
+    """
+    Traduz as colunas do DataFrame para o padrão universal 
+    utilizando o dicionário de mapeamento.
+    """
+    # Cria um dicionário de correspondência apenas para as colunas que existem no df
+    mapeamento_local = {col: DICIONARIO_UNIVERSAL[col] for col in df.columns if col in DICIONARIO_UNIVERSAL}
+    # Renomeia as colunas no pandas
+    return df.rename(columns=mapeamento_local)
+
+
 # ==========================================
 # 1. FUNÇÕES DE SUPORTE (UTILITÁRIOS)
 # ==========================================
@@ -59,6 +100,8 @@ def carregar_dados_protocolo(caminho_pasta):
     for ficheiro in ficheiros_csv:
         df = pd.read_csv(ficheiro)
         
+        df = padronizar_nomes_colunas(df)
+
         # 1. Tentar descobrir a coluna de Rótulo (Label) olhando para nomes comuns
         coluna_alvo = None
         for col in ['Label', 'label', 'Class', 'Attack_Label', 'Label_Category', 'Attack Type']:
@@ -90,6 +133,11 @@ def carregar_dados_protocolo(caminho_pasta):
     # 4. O ESCUDO MÁGICO: Manter APENAS colunas matemáticas (inteiros e decimais)
     X = dataset.select_dtypes(include=[np.number])
     
+    colunas_a_ignorar = ['source_port', 'destination_port', 'Source_Port', 'Dest_Port']
+    for col in colunas_a_ignorar:
+        if col in X.columns:
+            X = X.drop(columns=[col])
+            
     # Garantir que a resposta (Label_Binario) é removida do X para a IA não fazer batota!
     if 'Label_Binario' in X.columns:
         X = X.drop(columns=['Label_Binario'])
@@ -102,6 +150,12 @@ def preparar_dados_do_dataframe(df, coluna_alvo_escolhida):
     Recebe um DataFrame limpo do Streamlit e a coluna que o utilizador 
     indicou ser o Rótulo (Label).
     """
+    df = padronizar_nomes_colunas(df)
+    
+    # Caso a coluna alvo também tenha sido traduzida pelo dicionário, atualizamos o nome dela
+    if coluna_alvo_escolhida in DICIONARIO_UNIVERSAL:
+        coluna_alvo_escolhida = DICIONARIO_UNIVERSAL[coluna_alvo_escolhida]
+
     # 1. Criar o Label_Binario com base na coluna que o utilizador escolheu
     df['Label_Binario'] = df[coluna_alvo_escolhida].astype(str).apply(
         lambda x: 0 if x.strip().lower() in ['benign', 'normal', 'normal traffic', '0'] else 1
