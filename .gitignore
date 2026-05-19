@@ -18,3 +18,6 @@ modelos_treinados/*
 .venv/
 results/*
 !modelos_treinados/.gitkeep
+
+__pycache__/
+*.pyc
