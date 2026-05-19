@@ -179,20 +179,34 @@ def preparar_dados_do_dataframe(df, coluna_alvo_escolhida):
 # 4. O MOTOR DE TREINO PARA DATASET DO UTILIAZDOR (VIA INTERFACE WEB)
 # ====================================================================
 
-def treinar_fabrica_via_web(nome_protocolo, df, coluna_alvo):
-    """Versão adaptada do treinar_fabrica para uso no Streamlit"""
+def treinar_fabrica_via_web(nome_protocolo, df, coluna_alvo, config_treino=None):
+    """
+    Versão adaptada do treinar_fabrica para uso no Streamlit.
+    Suporta treino automático (por defeito) ou treino personalizado via config_treino.
+    """
     print(f"\n⚙️ A INICIAR FÁBRICA DE MODELOS PARA: {nome_protocolo} (Via Web) ⚙️")
     
-    # Usar a nova função em vez da carregar_dados_protocolo
+    # 1. Preparação dos Dados
     X, y = preparar_dados_do_dataframe(df, coluna_alvo)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
-    # Selecionar Top 15 Features para otimização
-    rf_temp = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1).fit(X_train, y_train)
-    top_15 = pd.Series(rf_temp.feature_importances_, index=X.columns).nlargest(15).index.tolist()
+    # ---------------------------------------------------------
+    # 2. SELEÇÃO DE FEATURES (Automático vs Personalizado)
+    # ---------------------------------------------------------
+    if config_treino and "features_selecionadas" in config_treino and len(config_treino["features_selecionadas"]) > 0:
+        # MODO PERSONALIZADO: Usar as colunas escolhidas pelo utilizador
+        features_originais = config_treino["features_selecionadas"]
+        features_usar = [DICIONARIO_UNIVERSAL.get(col, col) for col in features_originais]
+        print(f"🔍 A usar seleção de features personalizada ({len(features_usar)} features)...")
+    else:
+        # MODO AUTOMÁTICO: Selecionar Top 15 Features
+        print("🔍 A usar seleção de features automática (Top 15)...")
+        rf_temp = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1).fit(X_train, y_train)
+        features_usar = pd.Series(rf_temp.feature_importances_, index=X.columns).nlargest(15).index.tolist()
     
-    X_train = X_train[top_15]
-    X_test = X_test[top_15]
+    # Filtrar os datasets apenas com as features selecionadas
+    X_train = X_train[features_usar]
+    X_test = X_test[features_usar]
     
     # Normalização Robusta
     scaler = RobustScaler().fit(X_train)
@@ -201,13 +215,27 @@ def treinar_fabrica_via_web(nome_protocolo, df, coluna_alvo):
     
     # Guardar a Base (A Régua e as Features)
     os.makedirs(f'modelos_treinados/{nome_protocolo}/Base', exist_ok=True)
-    joblib.dump(top_15, f'modelos_treinados/{nome_protocolo}/Base/features.joblib')
+    joblib.dump(features_usar, f'modelos_treinados/{nome_protocolo}/Base/features.joblib')
     joblib.dump(scaler, f'modelos_treinados/{nome_protocolo}/Base/scaler.joblib')
 
     # ---------------------------------------------------------
+    # 3. DEFINIÇÃO DE HIPERPARÂMETROS
+    # ---------------------------------------------------------
+    # Definir valores por defeito (usados no modo automático)
+    params_rf = {'n_estimators': 100}
+    params_iso = {'n_estimators': 200, 'contamination': 0.05}
+    params_kmeans = {'n_clusters': 2}
+    
+    # Substituir pelos valores do utilizador, se existirem no config_treino
+    if config_treino:
+        params_rf.update(config_treino.get('rf_params', {}))
+        params_iso.update(config_treino.get('iso_params', {}))
+        params_kmeans.update(config_treino.get('kmeans_params', {}))
+
+    # ---------------------------------------------------------
     # Passo B: Treinar Algoritmo 1 - Random Forest (Supervisionado)
-    print("🧠 A treinar Random Forest...")
-    rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    print(f"🧠 A treinar Random Forest (Árvores: {params_rf['n_estimators']})...")
+    rf = RandomForestClassifier(n_estimators=params_rf['n_estimators'], random_state=42, n_jobs=-1)
     rf.fit(X_train_scaled, y_train)
     
     rf_preds = rf.predict(X_test_scaled)
@@ -216,11 +244,16 @@ def treinar_fabrica_via_web(nome_protocolo, df, coluna_alvo):
 
     # ---------------------------------------------------------
     # Passo C: Treinar Algoritmo 2 - Isolation Forest (Não Supervisionado)
-    print("🧠 A treinar Isolation Forest...")
+    print(f"🧠 A treinar Isolation Forest (Árvores: {params_iso['n_estimators']}, Contaminação: {params_iso['contamination']})...")
     # Aprende APENAS com tráfego normal
     X_train_normal = X_train_scaled[y_train == 0]
     
-    iso_f = IsolationForest(n_estimators=200, contamination=0.05, random_state=42, n_jobs=-1)
+    iso_f = IsolationForest(
+        n_estimators=params_iso['n_estimators'], 
+        contamination=params_iso['contamination'], 
+        random_state=42, 
+        n_jobs=-1
+    )
     iso_f.fit(X_train_normal)
     
     iso_preds_raw = iso_f.predict(X_test_scaled)
@@ -232,8 +265,8 @@ def treinar_fabrica_via_web(nome_protocolo, df, coluna_alvo):
 
     # ---------------------------------------------------------
     # Passo D: Treinar Algoritmo 3 - K-Means (Não Supervisionado)
-    print("🧠 A treinar K-Means...")
-    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+    print(f"🧠 A treinar K-Means (Clusters: {params_kmeans['n_clusters']})...")
+    kmeans = KMeans(n_clusters=params_kmeans['n_clusters'], random_state=42, n_init=10)
     kmeans.fit(X_train_scaled)
     
     kmeans_preds = kmeans.predict(X_test_scaled)

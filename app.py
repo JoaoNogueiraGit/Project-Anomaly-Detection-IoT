@@ -238,6 +238,14 @@ with tab3:
         melhor_palpite, score = process.extractOne("Label", colunas_disponiveis)
         index_padrao = colunas_disponiveis.index(melhor_palpite) if score > 80 else 0
 
+        # Botão para o utilizador selecionar o modo de treino
+        st.markdown("### Configuração do Treino")
+        modo_treino = st.radio(
+            "Selecione o modo de treino:",
+            options=["🤖 Automático (Recomendado)", "🛠️ Personalizado (Avançado)"],
+            horizontal=True
+        )
+
         with st.form("form_treino"):
             nome_novo_modelo = st.text_input("Dê um nome a este conjunto de dados (ex: IoT_Rede_Casa):", value="Custom_Dataset")
             
@@ -247,24 +255,62 @@ with tab3:
                 index=index_padrao
             )
             
+            config_treino = {} # Dicionário vazio por defeito
+            
+            if "Personalizado" in modo_treino:
+                st.markdown("---")
+                st.markdown("#### 🎛️ Afinação de Hiperparâmetros e Features")
+                
+                # 1. Seleção de Features
+                colunas_numericas = df.select_dtypes(include=['number']).columns.tolist()
+                # Remover o label das opções numéricas para ele não usar para treinar
+                if coluna_alvo in colunas_numericas: colunas_numericas.remove(coluna_alvo)
+                
+                features_selecionadas = st.multiselect(
+                    "Selecione as variáveis (features) a utilizar no treino:",
+                    options=colunas_numericas,
+                    default=colunas_numericas[:10], # Seleciona as primeiras 10 por defeito
+                    help="Se deixar vazio, o algoritmo tentará escolher automaticamente."
+                )
+                
+                # 2. Hiperparâmetros (usando tabs para organizar melhor)
+                t_rf, t_iso, t_km = st.tabs(["Random Forest", "Isolation Forest", "K-Means"])
+                
+                with t_rf:
+                    rf_arvores = st.slider("Número de Árvores (n_estimators)", min_value=10, max_value=300, value=100, step=10)
+                
+                with t_iso:
+                    iso_arvores = st.slider("Número de Árvores Base", min_value=50, max_value=500, value=200, step=50)
+                    iso_contam = st.slider("Taxa de Contaminação (Anomalias esperadas)", min_value=0.01, max_value=0.20, value=0.05, step=0.01)
+                
+                with t_km:
+                    km_clusters = st.number_input("Número de Clusters (k)", min_value=2, max_value=10, value=2)
+
+                # Construir o dicionário
+                config_treino = {
+                    "features_selecionadas": features_selecionadas,
+                    "rf_params": {"n_estimators": rf_arvores},
+                    "iso_params": {"n_estimators": iso_arvores, "contamination": iso_contam},
+                    "kmeans_params": {"n_clusters": km_clusters}
+                }
+
             botao_treinar = st.form_submit_button("🚀 Iniciar Treino de Modelos")
 
         if botao_treinar:
             if nome_novo_modelo.strip() == "":
                 st.error("Por favor, insira um nome válido para o conjunto de modelos.")
+            elif "Personalizado" in modo_treino and len(config_treino["features_selecionadas"]) == 0:
+                st.error("Modo personalizado: Por favor, selecione pelo menos uma feature para treinar.")
             else:
-                with st.spinner("A limpar dados e a treinar algoritmos... Isto pode demorar alguns minutos dependendo do tamanho do dataset."):
+                with st.spinner("A limpar dados e a treinar algoritmos..."):
                     try:
-                        # Chama a função adaptada no pipeline.py
-                        pipeline.treinar_fabrica_via_web(nome_novo_modelo, df, coluna_alvo)
+                        # Agora passamos as configurações para o pipeline
+                        # Se for automático, o config_treino passa como um dicionário vazio {}
+                        pipeline.treinar_fabrica_via_web(nome_novo_modelo, df, coluna_alvo, config_treino)
                         
-                        # Limpa a cache do Streamlit para ler os novos JSONs criados
                         load_all_metrics.clear()
-                        
                         st.session_state.treino_concluido = True
                         st.session_state.nome_recente = nome_novo_modelo
-                        
-                        # O recarregamento acontece imediatamente a seguir
                         st.rerun()
                         
                     except Exception as e:
@@ -319,19 +365,7 @@ with tab4:
                         X_novo_scaled = scaler.transform(X_novo)
                         
                         # 5. A Magia acontece: Fazer a Previsão!
-                        if "RandomForest" in mod_inferencia:
-                            # Pede as percentagens [Probabilidade Normal, Probabilidade Ataque]
-                            probabilidades = modelo.predict_proba(X_novo_scaled)
-                        
-                            # Extrai só a probabilidade de ser ataque (coluna 1)
-                            prob_ataque = probabilidades[:, 1]
-                        
-                            # O LIMIAR DE SEGURANÇA: Se tiver mais de 30% de parecença com um ataque, dispara o alarme!
-                            limiar = 0.20 
-                            previsoes = [1 if prob >= limiar else 0 for prob in prob_ataque]
-                        else:
-                            # Para K-Means e Isolation Forest usamos a previsão normal
-                                previsoes = modelo.predict(X_novo_scaled)
+                        previsoes = modelo.predict(X_novo_scaled)
                         
                         # Ajuste específico para o Isolation Forest (que devolve -1 para anomalias)
                         if "Isolation" in mod_inferencia:
